@@ -77,13 +77,34 @@ The hamster's speed reflects how fast you're consuming tokens *right now*, not j
 
 Claude Runner reads credentials the same way Claude Code stores them:
 
-| Platform        | Location                                              |
-|-----------------|-------------------------------------------------------|
-| **macOS**       | Keychain → `"Claude Code-credentials"` → `claudeAiOauth.accessToken` |
-| **Linux/Windows** | `~/.claude/.credentials.json`                        |
-| **Env var**     | `CLAUDE_CODE_OAUTH_TOKEN`                              |
+| Platform        | Location                                              | Status |
+|-----------------|-------------------------------------------------------|--------|
+| **macOS**       | Keychain → `"Claude Code-credentials"` → `claudeAiOauth.accessToken` | ✅ Tested |
+| **Windows**     | `%USERPROFILE%\.claude\.credentials.json` or Windows Credential Manager | 🔶 Fallback in code, untested — [help wanted](../../issues) |
+| **Linux**       | `~/.claude/.credentials.json`                         | 🔶 Fallback in code, untested — [help wanted](../../issues) |
+| **Env var**     | `CLAUDE_CODE_OAUTH_TOKEN`                              | ✅ Works everywhere |
 
 If no credentials are found, it falls back to demo mode with simulated data.
+
+### Credentials not detected? (Windows / Linux)
+
+If live mode shows "DEMO" instead of "LIVE", set the token manually:
+
+```bash
+# 1. Get your token
+claude auth status   # confirms you're logged in
+
+# 2. Find where Claude Code stores it
+cat ~/.claude/.credentials.json   # Linux
+type %USERPROFILE%\.claude\.credentials.json   # Windows
+
+# 3. If the file exists, Claude Runner should read it automatically.
+#    If not, set the env var and restart:
+export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-your-token-here"
+npm start
+```
+
+If you figure out where your platform stores the token, please open an issue or PR — we'd love to support it natively.
 
 ## Configuration
 
