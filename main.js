@@ -99,7 +99,59 @@ function readCredentials() {
     }
   }
 
-  // 2. Flat file (~/.claude/.credentials.json)
+  // 2. Windows Credential Manager (native Windows, non-WSL)
+  if (process.platform === 'win32') {
+    try {
+      // Read from Windows Credential Manager via PowerShell + CredRead P/Invoke
+      const psScript = `
+$sig = @'
+[DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+public static extern bool CredRead(string target, int type, int flags, out IntPtr credential);
+[DllImport("advapi32.dll")]
+public static extern void CredFree(IntPtr credential);
+[StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+public struct CREDENTIAL {
+  public int Flags; public int Type; public string TargetName; public string Comment;
+  public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+  public int CredentialBlobSize; public IntPtr CredentialBlob;
+  public int Persist; public int AttributeCount; public IntPtr Attributes;
+  public string TargetAlias; public string UserName;
+}
+'@
+Add-Type -MemberDefinition $sig -Namespace Win32 -Name CredMan
+$targets = @('Claude Code-credentials', 'Claude Code', 'claude-code-credentials')
+foreach ($t in $targets) {
+  $ptr = [IntPtr]::Zero
+  if ([Win32.CredMan]::CredRead($t, 1, 0, [ref]$ptr)) {
+    $cred = [System.Runtime.InteropServices.Marshal]::PtrToStructure($ptr, [type][Win32.CredMan+CREDENTIAL])
+    $blob = New-Object byte[] $cred.CredentialBlobSize
+    [System.Runtime.InteropServices.Marshal]::Copy($cred.CredentialBlob, $blob, 0, $cred.CredentialBlobSize)
+    [System.Text.Encoding]::Unicode.GetString($blob)
+    [Win32.CredMan]::CredFree($ptr)
+    break
+  }
+}`.replace(/\n/g, '; ');
+      const raw = execSync(`powershell -NoProfile -Command "${psScript.replace(/"/g, '\\"')}"`, {
+        encoding: 'utf-8', timeout: 10000
+      }).trim();
+      if (raw && raw.startsWith('{')) {
+        const creds = JSON.parse(raw);
+        const token = creds.claudeAiOauth?.accessToken;
+        if (token) {
+          return {
+            token,
+            plan: creds.claudeAiOauth.subscriptionType || 'unknown',
+            tier: creds.claudeAiOauth.rateLimitTier || '',
+            expiresAt: creds.claudeAiOauth.expiresAt,
+          };
+        }
+      }
+    } catch (e) {
+      console.log('  ⚠  Windows Credential Manager read failed, trying file fallback');
+    }
+  }
+
+  // 3. Flat file (~/.claude/.credentials.json) — Linux, WSL, and fallback
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const credPath = path.join(configDir, '.credentials.json');
   try {
@@ -119,7 +171,7 @@ function readCredentials() {
     }
   } catch {}
 
-  // 3. Env var
+  // 4. Env var
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     return { token: process.env.CLAUDE_CODE_OAUTH_TOKEN, plan: 'unknown', tier: '' };
   }

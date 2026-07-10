@@ -16,7 +16,7 @@ Claude doesn't tell you when your limits reset. There's no countdown. No notific
 ## Install
 
 ```bash
-git clone https://github.com/aakashkhanna/claude-runner.git
+git clone https://github.com/akahkhanna/claude-runner.git
 cd claude-runner
 npm install
 npm start
@@ -80,8 +80,9 @@ Claude Runner reads credentials the same way Claude Code stores them:
 | Platform        | Location                                              | Status |
 |-----------------|-------------------------------------------------------|--------|
 | **macOS**       | Keychain → `"Claude Code-credentials"` → `claudeAiOauth.accessToken` | ✅ Tested |
-| **Windows**     | `%USERPROFILE%\.claude\.credentials.json` or Windows Credential Manager | 🔶 Fallback in code, untested — [help wanted](../../issues) |
-| **Linux**       | `~/.claude/.credentials.json`                         | 🔶 Fallback in code, untested — [help wanted](../../issues) |
+| **Windows**     | Windows Credential Manager (via PowerShell), falls back to `%USERPROFILE%\.claude\.credentials.json` | 🔶 Implemented, needs testing — [feedback wanted](../../issues) |
+| **WSL**         | `~/.claude/.credentials.json`                         | 🔶 Should work via file fallback |
+| **Linux**       | `~/.claude/.credentials.json`                         | 🔶 Should work via file fallback |
 | **Env var**     | `CLAUDE_CODE_OAUTH_TOKEN`                              | ✅ Works everywhere |
 
 If no credentials are found, it falls back to demo mode with simulated data.
@@ -134,8 +135,8 @@ If you figure out where your platform stores the token, please open an issue or 
 PRs welcome. Some ideas:
 
 - [ ] Record a demo GIF for the README
-- [ ] Windows credential reading (Windows Credential Manager)
-- [ ] Linux keyring support
+- [ ] Test Windows Credential Manager reading on a real Windows machine
+- [ ] Linux keyring support (libsecret)
 - [ ] Native notifications via ntfy.sh / Pushover when limits reset
 - [ ] Customisable hamster skins
 - [ ] VS Code extension variant
@@ -143,7 +144,7 @@ PRs welcome. Some ideas:
 
 ## Acknowledgements
 
-Inspired by the gap in the Claude ecosystem — none of the existing usage trackers had any personality. Built by [Akash Khanna](https://github.com/aakashkhanna).
+Inspired by the gap in the Claude ecosystem — none of the existing usage trackers had any personality. Built by [Akash Khanna](https://github.com/akahkhanna).
 
 ## License
 
