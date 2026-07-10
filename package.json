@@ -1,0 +1,56 @@
+{
+  "name": "claude-runner",
+  "version": "0.1.0",
+  "description": "Your Claude usage limits, watched by a hamster. Floating desktop widget with live session tracking, snoring, and a victory chime.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --mock",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.clauderunner.app",
+    "productName": "Claude Runner",
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.developer-tools",
+      "darkModeSupport": true
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aakashkhanna/claude-runner.git"
+  },
+  "keywords": [
+    "claude",
+    "anthropic",
+    "usage",
+    "monitor",
+    "widget",
+    "desktop",
+    "electron",
+    "hamster"
+  ],
+  "author": "Akash Khanna",
+  "license": "MIT",
+  "dependencies": {
+    "electron": "^33.0.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.0.0"
+  }
+}
