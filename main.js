@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 const MOCK_MODE = process.argv.includes('--mock');
 const POLL_INTERVAL = 180_000;
 const WIN_WIDTH = 280;
-const WIN_HEIGHT = 500;
+const WIN_HEIGHT = 540;
 
 let mainWindow = null;
 let tray = null;
