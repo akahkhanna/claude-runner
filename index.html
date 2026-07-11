@@ -153,6 +153,12 @@
       <div class="meter-track"><div class="meter-fill" id="weeklyFill"></div></div>
       <div class="meter-sub" id="weeklyReset">↻ --</div>
     </div>
+
+    <!-- Per-model bars (populated when API returns model data) -->
+    <div id="modelSection" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.04);">
+      <div style="font-size:8px; color:rgba(255,255,255,0.3); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px;">By model · weekly</div>
+      <div id="modelBars"></div>
+    </div>
   </div>
 
   <div class="footer">
@@ -261,34 +267,61 @@ const svg = document.getElementById('scene');
 const NS = 'http://www.w3.org/2000/svg';
 function el(tag, a, p) { const e = document.createElementNS(NS, tag); for (const [k,v] of Object.entries(a||{})) e.setAttribute(k,v); (p||svg).appendChild(e); return e; }
 
+// Gradient + shadow defs for polished look
+const defs = el('defs', {});
+const bodyGrad = el('radialGradient', { id:'bodyGrad', cx:'0.4', cy:'0.35', r:'0.75' }, defs);
+el('stop', { offset:'0%', 'stop-color':'#E8B088' }, bodyGrad);
+el('stop', { offset:'55%', 'stop-color':'#D4956B' }, bodyGrad);
+el('stop', { offset:'100%', 'stop-color':'#B87A50' }, bodyGrad);
+const headGrad = el('radialGradient', { id:'headGrad', cx:'0.35', cy:'0.3', r:'0.8' }, defs);
+el('stop', { offset:'0%', 'stop-color':'#F0C09A' }, headGrad);
+el('stop', { offset:'60%', 'stop-color':'#E0A878' }, headGrad);
+el('stop', { offset:'100%', 'stop-color':'#C88E5E' }, headGrad);
+const bellyGrad = el('radialGradient', { id:'bellyGrad', cx:'0.5', cy:'0.4', r:'0.7' }, defs);
+el('stop', { offset:'0%', 'stop-color':'#F5E0C8' }, bellyGrad);
+el('stop', { offset:'100%', 'stop-color':'#E8C4A0' }, bellyGrad);
+const earGrad = el('radialGradient', { id:'earGrad', cx:'0.5', cy:'0.4', r:'0.7' }, defs);
+el('stop', { offset:'0%', 'stop-color':'#F0B8A0' }, earGrad);
+el('stop', { offset:'100%', 'stop-color':'#E0A088' }, earGrad);
+// Soft blur for ground shadow
+const blur = el('filter', { id:'softblur', x:'-50%', y:'-50%', width:'200%', height:'200%' }, defs);
+el('feGaussianBlur', { in:'SourceGraphic', stdDeviation:'1.2' }, blur);
+
 // Wheel
 const wheelG = el('g',{});
 el('line',{x1:50,y1:68,x2:38,y2:80,stroke:'#4A4A5A','stroke-width':2.5,'stroke-linecap':'round'},wheelG);
 el('line',{x1:50,y1:68,x2:62,y2:80,stroke:'#4A4A5A','stroke-width':2.5,'stroke-linecap':'round'},wheelG);
 el('line',{x1:34,y1:80,x2:66,y2:80,stroke:'#4A4A5A','stroke-width':2,'stroke-linecap':'round'},wheelG);
-el('circle',{cx:50,cy:36,r:30,fill:'none',stroke:'rgba(255,255,255,0.06)','stroke-width':4},wheelG);
-const usageArc = el('circle',{cx:50,cy:36,r:30,fill:'none',stroke:'#34D399','stroke-width':4,opacity:0.35,'stroke-dasharray':'0 189',transform:'rotate(-90 50 36)'},wheelG);
+// Wheel rim with subtle depth (double ring)
+el('circle',{cx:50,cy:36,r:30,fill:'none',stroke:'rgba(0,0,0,0.2)','stroke-width':5},wheelG);
+el('circle',{cx:50,cy:36,r:30,fill:'none',stroke:'rgba(255,255,255,0.07)','stroke-width':4},wheelG);
+const usageArc = el('circle',{cx:50,cy:36,r:30,fill:'none',stroke:'#34D399','stroke-width':4,opacity:0.4,'stroke-dasharray':'0 189',transform:'rotate(-90 50 36)','stroke-linecap':'round'},wheelG);
 const spokesG = el('g',{},wheelG);
 for(let i=0;i<8;i++){const a=(i/8)*Math.PI*2;el('line',{x1:50,y1:36,x2:50+Math.cos(a)*28,y2:36+Math.sin(a)*28,stroke:'rgba(255,255,255,0.08)','stroke-width':1},spokesG);}
 for(let i=0;i<16;i++){const a=(i/16)*Math.PI*2;el('line',{x1:50+Math.cos(a)*24,y1:36+Math.sin(a)*24,x2:50+Math.cos(a)*28,y2:36+Math.sin(a)*28,stroke:'rgba(255,255,255,0.05)','stroke-width':1.5},spokesG);}
-el('circle',{cx:50,cy:36,r:3,fill:'#3A3A4A',stroke:'rgba(255,255,255,0.1)','stroke-width':1},wheelG);
+el('circle',{cx:50,cy:36,r:3.5,fill:'#3A3A4A',stroke:'rgba(255,255,255,0.12)','stroke-width':1},wheelG);
+el('circle',{cx:50,cy:36,r:1.5,fill:'rgba(255,255,255,0.15)'},wheelG);
+
+// Ground shadow (moves with hamster bounce)
+const groundShadow = el('ellipse',{cx:50,cy:50,rx:11,ry:2.5,fill:'rgba(0,0,0,0.25)',filter:'url(#softblur)'});
 
 // Hamster parts
 const hamsterG = el('g',{});
 const h = {};
-h.tail = el('path',{d:'M 9 2 Q 16 -2 14 -6',stroke:'#C4845E','stroke-width':2,fill:'none','stroke-linecap':'round'},hamsterG);
-h.bl1 = el('line',{x1:5,y1:5,x2:5,y2:12,stroke:'#B8835A','stroke-width':2.5,'stroke-linecap':'round'},hamsterG);
-h.bl2 = el('line',{x1:2,y1:5,x2:2,y2:12,stroke:'#B8835A','stroke-width':2.5,'stroke-linecap':'round'},hamsterG);
-h.body = el('ellipse',{cx:0,cy:0,rx:10,ry:7,fill:'#D4956B'},hamsterG);
-el('ellipse',{cx:-2,cy:2,rx:6,ry:4,fill:'#E8C4A0',opacity:0.5},hamsterG);
-h.fl1 = el('line',{x1:-6,y1:5,x2:-6,y2:12,stroke:'#C4845E','stroke-width':2.5,'stroke-linecap':'round'},hamsterG);
-h.fl2 = el('line',{x1:-3,y1:5,x2:-3,y2:12,stroke:'#C4845E','stroke-width':2.5,'stroke-linecap':'round'},hamsterG);
-h.head = el('circle',{cx:-9,cy:-3,r:7,fill:'#E0A878'},hamsterG);
-h.cheek = el('circle',{cx:-5,cy:0,r:2.5,fill:'#E8967A',opacity:0.4},hamsterG);
-el('ellipse',{cx:-14,cy:-8,rx:3,ry:4,fill:'#C4845E'},hamsterG);
-el('ellipse',{cx:-14,cy:-8,rx:1.8,ry:2.5,fill:'#E8B090'},hamsterG);
-el('ellipse',{cx:-5,cy:-9,rx:3,ry:4,fill:'#C4845E'},hamsterG);
-el('ellipse',{cx:-5,cy:-9,rx:1.8,ry:2.5,fill:'#E8B090'},hamsterG);
+h.tail = el('path',{d:'M 9 2 Q 16 -2 14 -6',stroke:'#C4845E','stroke-width':2.5,fill:'none','stroke-linecap':'round'},hamsterG);
+h.bl1 = el('line',{x1:5,y1:5,x2:5,y2:12,stroke:'#B8835A','stroke-width':3,'stroke-linecap':'round'},hamsterG);
+h.bl2 = el('line',{x1:2,y1:5,x2:2,y2:12,stroke:'#B8835A','stroke-width':3,'stroke-linecap':'round'},hamsterG);
+h.body = el('ellipse',{cx:0,cy:0,rx:10.5,ry:7.5,fill:'url(#bodyGrad)'},hamsterG);
+el('ellipse',{cx:-2,cy:2.5,rx:6.5,ry:4.5,fill:'url(#bellyGrad)',opacity:0.85},hamsterG);
+h.bodyHi = el('ellipse',{cx:-3,cy:-3,rx:4,ry:2.5,fill:'rgba(255,255,255,0.25)'},hamsterG);
+h.fl1 = el('line',{x1:-6,y1:5,x2:-6,y2:12,stroke:'#C4845E','stroke-width':3,'stroke-linecap':'round'},hamsterG);
+h.fl2 = el('line',{x1:-3,y1:5,x2:-3,y2:12,stroke:'#C4845E','stroke-width':3,'stroke-linecap':'round'},hamsterG);
+h.head = el('circle',{cx:-9,cy:-3,r:7.5,fill:'url(#headGrad)'},hamsterG);
+h.cheek = el('circle',{cx:-5,cy:0.5,r:2.8,fill:'#EF9A82',opacity:0.5},hamsterG);
+el('ellipse',{cx:-14,cy:-8,rx:3.2,ry:4.2,fill:'url(#earGrad)'},hamsterG);
+el('ellipse',{cx:-14,cy:-8,rx:1.8,ry:2.5,fill:'#D4907C'},hamsterG);
+el('ellipse',{cx:-5,cy:-9,rx:3.2,ry:4.2,fill:'url(#earGrad)'},hamsterG);
+el('ellipse',{cx:-5,cy:-9,rx:1.8,ry:2.5,fill:'#D4907C'},hamsterG);
 h.e1 = el('circle',{cx:-12,cy:-4,r:1.5,fill:'#2D1A0E'},hamsterG);
 h.e2 = el('circle',{cx:-7,cy:-4,r:1.5,fill:'#2D1A0E'},hamsterG);
 h.sh1 = el('circle',{cx:-11.5,cy:-4.5,r:0.5,fill:'white'},hamsterG);
@@ -326,6 +359,9 @@ function animate(){
 
   if(exh){
     hamsterG.setAttribute('transform','translate(50,34)');
+    groundShadow.setAttribute('opacity',0.3);
+    groundShadow.setAttribute('rx',12);groundShadow.setAttribute('ry',2.5);
+    h.bodyHi.setAttribute('opacity',0);
     h.body.setAttribute('rx',11);h.body.setAttribute('ry',6);h.body.setAttribute('transform','rotate(15)');
     h.head.setAttribute('cx',-10);h.head.setAttribute('cy',-1);
     h.e1.setAttribute('r',0);h.e2.setAttribute('r',0);h.sh1.setAttribute('r',0);h.sh2.setAttribute('r',0);
@@ -346,14 +382,20 @@ function animate(){
     if(!snoring&&state.soundOn) startSnore();
   } else {
     if(snoring) stopSnore();
-    const by=26-(spd>0?Math.abs(sin(tick*(0.04+spd*0.03)))*(1.5+spd*1.5):0)-(state.celebrating?Math.abs(sin(tick*0.08))*8:0);
+    const bounce = spd>0?Math.abs(sin(tick*(0.04+spd*0.03)))*(1.5+spd*1.5):0;
+    const by=26-bounce-(state.celebrating?Math.abs(sin(tick*0.08))*8:0);
     hamsterG.setAttribute('transform',`translate(50,${by})`);
-    h.body.setAttribute('rx',10);h.body.setAttribute('ry',7+sin(tick*0.05)*0.3);h.body.setAttribute('transform','');
+    // Ground shadow shrinks as hamster rises
+    groundShadow.setAttribute('opacity',0.25);
+    groundShadow.setAttribute('rx',11-bounce*0.6);
+    groundShadow.setAttribute('ry',2.5-bounce*0.15);
+    h.body.setAttribute('rx',10.5);h.body.setAttribute('ry',7.5+sin(tick*0.05)*0.3);h.body.setAttribute('transform','');
+    h.bodyHi.setAttribute('opacity',0.25);
     h.head.setAttribute('cx',-9);h.head.setAttribute('cy',-3);
     h.e1.setAttribute('r',1.5);h.e2.setAttribute('r',1.5);
     h.sh1.setAttribute('r',spd>=2.5?0:0.5);h.sh2.setAttribute('r',spd>=2.5?0:0.5);
-    h.cheek.setAttribute('cx',-5);h.cheek.setAttribute('cy',0);h.cheek.setAttribute('rx',2.5);h.cheek.setAttribute('ry',2.5);
-    h.cheek.setAttribute('fill','#E8967A');h.cheek.setAttribute('opacity',0.4);
+    h.cheek.setAttribute('cx',-5);h.cheek.setAttribute('cy',0.5);h.cheek.setAttribute('rx',2.8);h.cheek.setAttribute('ry',2.8);
+    h.cheek.setAttribute('fill','#EF9A82');h.cheek.setAttribute('opacity',0.5);
     if(spd>=1.5){h.mouth.setAttribute('d',`M -11 0 Q -9.5 ${2+1+sin(tick*0.08)*0.5} -8 0`);h.mouth.setAttribute('fill','#C4645A');h.mouth.setAttribute('stroke','none');}
     else{h.mouth.setAttribute('d','M -11 0 Q -9.5 2 -8 0');h.mouth.setAttribute('fill','none');h.mouth.setAttribute('stroke','#8B5E3C');}
     [h.fl1,h.fl2,h.bl1,h.bl2].forEach(l=>l.setAttribute('opacity',1));
@@ -472,7 +514,30 @@ setInterval(() => {
 // ═══════════════════════════════════════════
 //  IPC from main process
 // ═══════════════════════════════════════════
-window.claude.onUsageUpdate((data) => {
+//  Model bars
+// ═══════════════════════════════════════════
+function renderModels(models) {
+  const section = document.getElementById('modelSection');
+  const container = document.getElementById('modelBars');
+  if (!models || models.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  container.innerHTML = models.map(m => {
+    const col = m.color || usageColor(m.pct);
+    const w = Math.min(m.pct, 100);
+    return `<div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+      <span style="font-size:8px; color:rgba(255,255,255,0.5); width:42px; flex-shrink:0;">${m.name}</span>
+      <div style="flex:1; height:4px; border-radius:2px; background:rgba(255,255,255,0.06); overflow:hidden;">
+        <div style="width:${w}%; height:100%; border-radius:2px; background:${col}; transition:width 0.6s ease;"></div>
+      </div>
+      <span style="font-size:8px; font-weight:600; color:${col}; width:24px; text-align:right; font-variant-numeric:tabular-nums;">${Math.round(m.pct)}%</span>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════
   state.prevSessionPct = state.sessionPct;
   state.sessionPct = data.session?.pct ?? 0;
   state.weeklyPct = data.weekly?.pct ?? 0;
@@ -480,6 +545,7 @@ window.claude.onUsageUpdate((data) => {
   state.weeklyResetAt = data.weekly?.resetAt;
   state.mock = data.mock !== false;
   state.plan = data.plan || '';
+  renderModels(data.models || []);
 
   trackBurn(state.sessionPct);
 

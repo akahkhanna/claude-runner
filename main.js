@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 const MOCK_MODE = process.argv.includes('--mock');
 const POLL_INTERVAL = 180_000;
 const WIN_WIDTH = 280;
-const WIN_HEIGHT = 440;
+const WIN_HEIGHT = 500;
 
 let mainWindow = null;
 let tray = null;
@@ -231,21 +231,40 @@ function parseUsage(raw, plan, tier) {
     resetAt: raw.seven_day?.resets_at ?? null,
   };
 
-  // Per-model from limits array
+  // Per-model: merge top-level seven_day_<model> keys + limits[] scoped entries
   const models = [];
+  const seen = new Set();
+
+  // Top-level model keys (populate for heavier users)
+  const modelKeys = [
+    ['seven_day_opus', 'Opus', '#C084FC'],
+    ['seven_day_sonnet', 'Sonnet', '#60A5FA'],
+    ['seven_day_cowork', 'Cowork', '#34D399'],
+  ];
+  for (const [key, name, color] of modelKeys) {
+    const m = raw[key];
+    if (m && typeof m === 'object' && m.utilization != null) {
+      models.push({ id: name.toLowerCase(), name, pct: m.utilization, resetAt: m.resets_at, color });
+      seen.add(name.toLowerCase());
+    }
+  }
+
+  // Scoped models from limits array
   if (Array.isArray(raw.limits)) {
     for (const lim of raw.limits) {
       if (lim.kind === 'session') {
-        session.severity = lim.severity; // normal, warning, critical
+        session.severity = lim.severity;
         session.isActive = lim.is_active;
       }
-      if (lim.scope?.model?.display_name) {
+      const dn = lim.scope?.model?.display_name;
+      if (dn && !seen.has(dn.toLowerCase())) {
+        const palette = { fable: '#34D399', opus: '#C084FC', sonnet: '#60A5FA', haiku: '#FBBF24' };
         models.push({
-          id: lim.scope.model.display_name.toLowerCase(),
-          name: lim.scope.model.display_name,
-          pct: lim.percent ?? 0,
-          severity: lim.severity,
+          id: dn.toLowerCase(), name: dn,
+          pct: lim.percent ?? 0, resetAt: lim.resets_at,
+          color: palette[dn.toLowerCase()] || '#8B5CF6',
         });
+        seen.add(dn.toLowerCase());
       }
     }
   }
@@ -274,7 +293,11 @@ function mockUsage() {
       pct: Math.round((35 + Math.sin(Date.now() / 60000) * 15) * 10) / 10,
       resetAt: new Date(Date.now() + 4 * 86400000).toISOString(),
     },
-    models: [],
+    models: [
+      { id: 'opus', name: 'Opus', pct: Math.round((45 + Math.sin(Date.now()/40000)*20)), color: '#C084FC' },
+      { id: 'sonnet', name: 'Sonnet', pct: Math.round((28 + Math.sin(Date.now()/55000)*12)), color: '#60A5FA' },
+      { id: 'fable', name: 'Fable', pct: Math.round((12 + Math.sin(Date.now()/70000)*8)), color: '#34D399' },
+    ],
     plan: 'demo',
     tier: '',
     mock: true,
