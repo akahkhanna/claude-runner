@@ -135,6 +135,7 @@ If you figure out where your platform stores the token, please open an issue or 
 PRs welcome. Some ideas:
 
 - [ ] Record a demo GIF for the README
+- [ ] Integrate 3D mode (`experiments/claude-runner-3d.jsx` — Three.js hamster, needs GLTF model for production quality)
 - [ ] Test Windows Credential Manager reading on a real Windows machine
 - [ ] Linux keyring support (libsecret)
 - [ ] Native notifications via ntfy.sh / Pushover when limits reset
