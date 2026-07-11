@@ -12,7 +12,9 @@ export default function ClaudeRunner3D() {
   const [weeklyResetMs, setWeeklyResetMs] = useState(0);
   const [plan, setPlan] = useState('');
   const [mock, setMock] = useState(true);
+  const [stale, setStale] = useState(false);
   const [models, setModels] = useState([]);
+  const [codex, setCodex] = useState(null);
   const [mode, setMode] = useState('2d');
   const snoreRef = useRef(null);
   const soundRef = useRef(true);
@@ -25,6 +27,18 @@ export default function ClaudeRunner3D() {
   useEffect(() => { pctRef.current = pct; }, [pct]);
   useEffect(() => { soundRef.current = soundOn; }, [soundOn]);
   useEffect(() => { burnRef.current = burnRate; }, [burnRate]);
+
+  // Auto-fit window height to content (card height + body padding + margins)
+  const cardRef = useRef(null);
+  useEffect(() => {
+    if (!cardRef.current || !window.claude?.resize) return;
+    const ro = new ResizeObserver(entries => {
+      const h = entries[0].contentRect.height;
+      window.claude.resize(h + 12 + 16); // body padding 6*2 + card margin 8*2
+    });
+    ro.observe(cardRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   // Burn rate — track pct changes over last 60s
   useEffect(() => {
@@ -51,8 +65,10 @@ export default function ClaudeRunner3D() {
       setPct(data.session?.pct ?? 0);
       setWeeklyPct(data.weekly?.pct ?? 0);
       setMock(data.mock !== false);
+      setStale(!!data.stale);
       setPlan(data.plan || '');
       if (data.models?.length) setModels(data.models);
+      setCodex(data.codex ?? null);
       if (data.session?.resetAt) {
         setResetMs(Math.max(0, new Date(data.session.resetAt) - Date.now()));
       }
@@ -117,18 +133,21 @@ export default function ClaudeRunner3D() {
     if (!el) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a24);
+    // No scene.background — let the widget container show through
     const camera = new THREE.PerspectiveCamera(40, 280 / 180, 0.1, 100);
-    camera.position.set(-0.4, 0.2, 6.2);
-    camera.lookAt(0, -0.3, 0);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    camera.position.set(-0.3, 0.15, 5.6);
+    camera.lookAt(0, -0.15, 0);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(280, 180);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     el.appendChild(renderer.domElement);
 
-    scene.add(new THREE.AmbientLight(0x8888aa, 0.7));
-    const dl = new THREE.DirectionalLight(0xffeedd, 1.1);
+    scene.add(new THREE.AmbientLight(0xaaaacc, 1.0));
+    const dl = new THREE.DirectionalLight(0xffeedd, 1.3);
     dl.position.set(3, 5, 4); scene.add(dl);
+    // Fill light from below-front to lift the hamster out of shadow
+    const fill = new THREE.DirectionalLight(0xddeeff, 0.5);
+    fill.position.set(-1, -2, 3); scene.add(fill);
 
     const wMat = new THREE.MeshStandardMaterial({ color: 0x4a4a5a, metalness: 0.5, roughness: 0.35 });
     const sMat = new THREE.MeshStandardMaterial({ color: 0x5a5a6a, metalness: 0.4, roughness: 0.5 });
@@ -191,8 +210,10 @@ export default function ClaudeRunner3D() {
     }
 
     // Hamster — single body mesh with painted texture (no overlapping patches)
+    // YAW turns the face toward the camera (face is at -x); pure profile = no personality
+    const YAW = 0.55;
     const hG = new THREE.Group();
-    hG.position.set(0, -1.1, 0); hG.rotation.y = 0; hG.scale.setScalar(0.7);
+    hG.position.set(0, -1.1, 0); hG.rotation.y = YAW; hG.scale.setScalar(0.95);
     scene.add(hG);
 
     // Paint the fur as a texture: golden top → white belly, white face zone
@@ -234,20 +255,23 @@ export default function ClaudeRunner3D() {
     hd.position.set(-9*U, 3*U, 0);
     hG.add(hd);
 
-    // Ears — tiny rounded nubs, barely visible (hamster ears are small)
+    // Ears — bigger rounded ears with pink inners (like the 2D)
     for (const [ex, s] of [[-13, 1], [-6, -1]]) {
-      const ear = new THREE.Mesh(new THREE.SphereGeometry(1.8*U, 6, 6).scale(1, 1.3, 0.5), goldenMat);
-      ear.position.set(ex*U, 8.8*U, s * 2.5*U);
+      const ear = new THREE.Mesh(new THREE.SphereGeometry(2.6*U, 8, 8).scale(1, 1.25, 0.5), goldenMat);
+      ear.position.set(ex*U, 9.5*U, s * 3*U);
       hG.add(ear);
+      const inner = new THREE.Mesh(new THREE.SphereGeometry(1.5*U, 6, 6).scale(1, 1.2, 0.4), pinkInner);
+      inner.position.set((ex - 0.8)*U, 9.5*U, s * 3.1*U);
+      hG.add(inner);
     }
 
-    // Eyes — 2D at (-12,-4) and (-7,-4) → both sides of head in 3D
+    // Eyes — bigger and glossier (personality lives here)
     for (const s of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(1.5*U, 8, 8),
-        new THREE.MeshStandardMaterial({ color: 0x14100a, roughness: 0.15 }));
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(2.1*U, 10, 10),
+        new THREE.MeshStandardMaterial({ color: 0x14100a, roughness: 0.1 }));
       eye.position.set(-13*U, 4.5*U, s * 5*U); hG.add(eye);
-      const shine = new THREE.Mesh(new THREE.SphereGeometry(0.55*U, 4, 4), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-      shine.position.set(-13.6*U, 5*U, s * 4.7*U); hG.add(shine);
+      const shine = new THREE.Mesh(new THREE.SphereGeometry(0.8*U, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      shine.position.set(-14.2*U, 5.4*U, s * 4.6*U); hG.add(shine);
     }
     // Nose — 2D at (-9.5,-1.5) front of head
     const nose = new THREE.Mesh(new THREE.SphereGeometry(1*U, 6, 6), pinkInner);
@@ -275,11 +299,7 @@ export default function ClaudeRunner3D() {
       paw.position.set(x*U, -7.5*U, z*U); hG.add(paw); lgs.push(paw);
     }
 
-    // Ground
-    const gnd = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshStandardMaterial({ color: 0x15151f }));
-    gnd.rotation.x = -Math.PI / 2;
-    gnd.position.y = -2.0;
-    scene.add(gnd);
+    // (no ground plane — alpha-transparent renderer blends with widget container)
 
     let t = 0, lastTs = 0, raf;
     function loop(ts) {
@@ -299,7 +319,7 @@ export default function ClaudeRunner3D() {
         const sr = wrs * 0.7, st2 = t * sr;
         hG.position.y = -1.1 + Math.abs(Math.sin(st2 * Math.PI * 2)) * (0.02 + spd * 0.012);
         hG.rotation.z = spd >= 2 ? Math.sin(st2 * Math.PI * 2) * 0.02 : 0;
-        hG.rotation.y = 0;
+        hG.rotation.y = YAW + Math.sin(st2 * Math.PI) * 0.04;
 
         // Elliptical run cycle: each foot traces an ellipse
         // (forward on the ground = drive, lifted circle back = recovery)
@@ -317,11 +337,11 @@ export default function ClaudeRunner3D() {
         }
       } else {
         hG.rotation.z = THREE.MathUtils.lerp(hG.rotation.z, 0.4, dt * 2);
-        hG.position.y = -1.15; hG.rotation.y = 0;
+        hG.position.y = -1.15; hG.rotation.y = YAW;
         lgs.forEach((l, i) => { l.position.y = -7*U; });
       }
       tl.rotation.y = Math.sin(t * 2) * 0.2;
-      camera.position.x = -0.4 + Math.sin(t * 0.15) * 0.06;
+      camera.position.x = -0.3 + Math.sin(t * 0.15) * 0.06;
       renderer.render(scene, camera);
     }
     raf = requestAnimationFrame(loop);
@@ -387,6 +407,10 @@ export default function ClaudeRunner3D() {
         {exh2 ? (
           <g transform="translate(50,56)">
             <ellipse cx="0" cy="0" rx="11" ry="6" fill="url(#bg2)" transform="rotate(15)"/>
+            <ellipse cx="-14" cy="-5.5" rx="2" ry="2.5" fill="#C98B4E" transform="rotate(-25 -14 -5.5)"/>
+            <ellipse cx="-14" cy="-5" rx="1.1" ry="1.5" fill="#E8A5A0" transform="rotate(-25 -14 -5)"/>
+            <ellipse cx="-6" cy="-5.5" rx="2" ry="2.5" fill="#C98B4E" transform="rotate(25 -6 -5.5)"/>
+            <ellipse cx="-6" cy="-5" rx="1.1" ry="1.5" fill="#E8A5A0" transform="rotate(25 -6 -5)"/>
             <circle cx="-10" cy="-1" r="6.5" fill="url(#hg2)"/>
             <line x1="-13" y1="-3" x2="-11" y2="-1" stroke="#5D3A1A" strokeWidth="1.2" strokeLinecap="round"/>
             <line x1="-11" y1="-3" x2="-13" y2="-1" stroke="#5D3A1A" strokeWidth="1.2" strokeLinecap="round"/>
@@ -403,6 +427,10 @@ export default function ClaudeRunner3D() {
             <ellipse cx="0" cy="0" rx="10.5" ry="7.5" fill="url(#bg2)"/>
             <ellipse cx="-2" cy="2.5" rx="6.5" ry="4.5" fill="#E8C4A0" opacity="0.6"/>
             {legL(-6,5,lg[0],'#C4845E')}{legL(-3,5,lg[1],'#C4845E')}
+            <ellipse cx="-13" cy="-9" rx="2.2" ry="3" fill="#C98B4E" transform="rotate(-10 -13 -9)"/>
+            <ellipse cx="-13" cy="-8.5" rx="1.2" ry="1.8" fill="#E8A5A0" transform="rotate(-10 -13 -8.5)"/>
+            <ellipse cx="-5" cy="-9" rx="2.2" ry="3" fill="#C98B4E" transform="rotate(10 -5 -9)"/>
+            <ellipse cx="-5" cy="-8.5" rx="1.2" ry="1.8" fill="#E8A5A0" transform="rotate(10 -5 -8.5)"/>
             <circle cx="-9" cy="-3" r="7.5" fill="url(#hg2)"/>
             <circle cx="-5" cy="0.5" r="2.8" fill="#EF9A82" opacity="0.5"/>
             <circle cx="-12" cy="-4" r="1.5" fill="#2D1A0E"/><circle cx="-7" cy="-4" r="1.5" fill="#2D1A0E"/>
@@ -417,8 +445,8 @@ export default function ClaudeRunner3D() {
   };
 
   return (
-    <div style={{ width:280, margin:'16px auto', fontFamily:'-apple-system,system-ui,sans-serif', userSelect:'none' }}>
-      <div style={{ background:'rgba(24,24,30,0.97)', borderRadius:14, border:'1px solid rgba(255,255,255,0.07)', boxShadow:'0 8px 30px rgba(0,0,0,0.5)', overflow:'hidden' }}>
+    <div style={{ width:280, margin:'8px auto', fontFamily:'-apple-system,system-ui,sans-serif', userSelect:'none' }}>
+      <div ref={cardRef} style={{ background:'rgba(24,24,30,0.97)', borderRadius:14, border:'1px solid rgba(255,255,255,0.07)', boxShadow:'0 8px 30px rgba(0,0,0,0.5)', overflow:'hidden' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 12px 5px', borderBottom:'1px solid rgba(255,255,255,0.05)', WebkitAppRegion:'drag' }}>
           <div style={{ display:'flex', alignItems:'center', gap:5, WebkitAppRegion:'no-drag' }}>
             <div onClick={()=>window.claude?.close()} style={{ width:12, height:12, borderRadius:'50%', background:'#FF5F57', cursor:'pointer' }} />
@@ -428,11 +456,12 @@ export default function ClaudeRunner3D() {
           <div style={{ display:'flex', alignItems:'center', gap:4, WebkitAppRegion:'no-drag' }}>
             <button onClick={()=>setMode(m=>m==='3d'?'2d':'3d')} style={{ fontSize:8, fontWeight:600, color:'#5B8DEF', background:'rgba(91,141,239,0.12)', padding:'2px 6px', borderRadius:4, border:'none', cursor:'pointer' }}>{mode.toUpperCase()}</button>
             {plan && plan !== 'demo' && plan !== 'unknown' && <span style={{ fontSize:8, fontWeight:600, color:'#8B5CF6', background:'rgba(139,92,246,0.12)', padding:'2px 6px', borderRadius:4, textTransform:'uppercase' }}>{plan}</span>}
-            <span style={{ fontSize:8, fontWeight:600, color:mock?'rgba(255,255,255,0.3)':'#34D399', background:mock?'rgba(255,255,255,0.05)':'rgba(52,211,153,0.12)', padding:'2px 6px', borderRadius:4 }}>{mock?'DEMO':'LIVE'}</span>
+            <span style={{ fontSize:8, fontWeight:600, color:mock?'rgba(255,255,255,0.3)':stale?'#FBBF24':'#34D399', background:mock?'rgba(255,255,255,0.05)':stale?'rgba(251,191,36,0.12)':'rgba(52,211,153,0.12)', padding:'2px 6px', borderRadius:4 }}>{mock?'DEMO':stale?'STALE':'LIVE'}</span>
             <button onClick={()=>{const n=!soundOn;setSoundOn(n);if(!n)stopSnore();else if(pct>=100)startSnore();}} style={{ background:'none',border:'none',cursor:'pointer',fontSize:12,color:soundOn?'#5B8DEF':'rgba(255,255,255,0.15)' }}>{soundOn?'🔔':'🔕'}</button>
           </div>
         </div>
-        {mode === '3d' ? <div ref={mountRef} style={{ width:280, height:180 }} /> : <Scene2D />}
+        <div ref={mountRef} style={{ width:280, height:180, display: mode === '3d' ? 'block' : 'none' }} />
+        {mode === '2d' && <Scene2D />}
         <div style={{ textAlign:'center', padding:'1px 12px 4px', fontSize:10, color:'rgba(255,255,255,0.4)', fontWeight:500 }}>{exh?'💤 Collapsed…':pct>=90?'🏃 Sprinting!':pct>=60?'😤 Running hard':pct>=20?'🐹 Jogging':'✨ Fresh'}</div>
         <div style={{ margin:'0 12px 5px', padding:'6px 8px', borderRadius:8, textAlign:'center', background:exh?'rgba(248,113,113,0.08)':'rgba(255,255,255,0.03)', border:`1px solid ${exh?'rgba(248,113,113,0.12)':'rgba(255,255,255,0.04)'}` }}>
           <div style={{ fontSize:22, fontWeight:700, letterSpacing:-1, fontVariantNumeric:'tabular-nums', fontFamily:"ui-monospace,'SF Mono',Menlo,monospace", color:exh?'#F87171':'rgba(255,255,255,0.85)' }}>{fmtCountdown(resetMs)}</div>
@@ -463,6 +492,29 @@ export default function ClaudeRunner3D() {
               <span style={{ fontSize:8, fontWeight:600, color:m.color, width:22, textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{m.pct}%</span>
             </div>)}
           </div>
+          {codex && !codex.error && (() => {
+            const cs = codex.session?.pct ?? 0, cw = codex.weekly?.pct ?? 0;
+            const csCol = cs >= 90 ? '#F87171' : cs >= 70 ? '#FBBF24' : '#74AA9C';
+            const cwCol = cw >= 90 ? '#F87171' : cw >= 70 ? '#FBBF24' : '#74AA9C';
+            const csMs = codex.session?.resetAt ? Math.max(0, new Date(codex.session.resetAt) - Date.now()) : 0;
+            const cwMs = codex.weekly?.resetAt ? Math.max(0, new Date(codex.weekly.resetAt) - Date.now()) : 0;
+            return (
+              <div style={{ paddingTop:5, marginTop:5, borderTop:'1px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)', textTransform:'uppercase', letterSpacing:0.6, marginBottom:4 }}>⬡ Codex</div>
+                <div style={{ display:'flex', alignItems:'center', gap:5, marginBottom:3 }}>
+                  <span style={{ fontSize:8, color:'rgba(255,255,255,0.5)', width:38, flexShrink:0 }}>5h</span>
+                  <div style={{ flex:1, height:4, borderRadius:2, background:'rgba(255,255,255,0.06)', overflow:'hidden' }}><div style={{ width:`${Math.min(cs,100)}%`, height:'100%', borderRadius:2, background:csCol }} /></div>
+                  <span style={{ fontSize:8, fontWeight:600, color:csCol, width:22, textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{cs}%</span>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                  <span style={{ fontSize:8, color:'rgba(255,255,255,0.5)', width:38, flexShrink:0 }}>Weekly</span>
+                  <div style={{ flex:1, height:4, borderRadius:2, background:'rgba(255,255,255,0.06)', overflow:'hidden' }}><div style={{ width:`${Math.min(cw,100)}%`, height:'100%', borderRadius:2, background:cwCol }} /></div>
+                  <span style={{ fontSize:8, fontWeight:600, color:cwCol, width:22, textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{cw}%</span>
+                </div>
+                <div style={{ fontSize:9, color:'rgba(255,255,255,0.4)', marginTop:3 }}>{csMs > 0 ? `5h ${fmtResetLabel(csMs).replace('↻ Resets in ', '↻ ')}` : ''}{csMs > 0 && cwMs > 0 ? ' · ' : ''}{cwMs > 0 ? `wk ${fmtResetLabel(cwMs).replace('↻ Resets in ', '↻ ')}` : ''}</div>
+              </div>
+            );
+          })()}
         </div>
         <div style={{ padding:'4px 12px 8px', borderTop:'1px solid rgba(255,255,255,0.04)' }}>
           <button onClick={async ()=>{ if (window.claude?.refresh) await window.claude.refresh(); }} style={{ width:'100%', padding:'6px 0', borderRadius:7, background:'rgba(91,141,239,0.1)', border:'1px solid rgba(91,141,239,0.12)', color:'#5B8DEF', fontSize:10, fontWeight:500, cursor:'pointer', WebkitAppRegion:'no-drag' }}>

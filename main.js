@@ -8,11 +8,24 @@ const { execSync } = require('child_process');
 const MOCK_MODE = process.argv.includes('--mock');
 const POLL_INTERVAL = 180_000;
 const WIN_WIDTH = 280;
-const WIN_HEIGHT = 540;
+const WIN_HEIGHT = 470;
+
+// Single instance — multiple copies of this app each polling the usage
+// endpoint on the same token is a fast route to a 429
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+  });
+}
 
 let mainWindow = null;
 let tray = null;
 let pollTimer = null;
+let lastGoodUsage = null;
+let claudeBackoffUntil = 0;
 
 // ═══════════════════════════════════════════
 //  Window
@@ -23,8 +36,8 @@ function createWindow() {
     width: WIN_WIDTH, height: WIN_HEIGHT,
     x: screenW - WIN_WIDTH - 20, y: 60,
     frame: false, transparent: true, alwaysOnTop: true,
-    resizable: false, skipTaskbar: true, hasShadow: true,
-    vibrancy: 'under-window', visualEffectState: 'active', roundedCorners: true,
+    resizable: false, skipTaskbar: true, hasShadow: false,
+    roundedCorners: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true, nodeIntegration: false,
@@ -65,12 +78,15 @@ function createTray() {
 //         Token at: creds.claudeAiOauth.accessToken
 //  Linux/Windows: ~/.claude/.credentials.json
 // ═══════════════════════════════════════════
+let cachedClaudeVersion = null;
 function getClaudeVersion() {
+  if (cachedClaudeVersion) return cachedClaudeVersion;
   try {
     const o = execSync('claude --version', { timeout: 5000, encoding: 'utf-8' }).trim();
     const m = o.match(/(\d+\.\d+\.\d+)/);
-    return m ? m[1] : '2.1.0';
-  } catch { return '2.1.0'; }
+    cachedClaudeVersion = m ? m[1] : '2.1.0';
+  } catch { cachedClaudeVersion = '2.1.0'; }
+  return cachedClaudeVersion;
 }
 
 function readCredentials() {
@@ -201,6 +217,15 @@ function fetchUsageAPI(token) {
           try { resolve(JSON.parse(body)); }
           catch { reject(new Error('Bad JSON')); }
         } else {
+          if (res.statusCode === 429) {
+            const rl = Object.entries(res.headers)
+              .filter(([k]) => k === 'retry-after' || k.startsWith('x-ratelimit') || k.includes('anthropic-ratelimit'))
+              .map(([k, v]) => `${k}=${v}`).join(', ');
+            console.log(`  📛 429 headers: ${rl || '(none exposed)'}`);
+            const err = new Error(`HTTP 429: ${body.slice(0, 120)}`);
+            err.retryAfter = parseInt(res.headers['retry-after'], 10) || null;
+            return reject(err);
+          }
           reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`));
         }
       });
@@ -235,17 +260,17 @@ function parseUsage(raw, plan, tier) {
   const models = [];
   const seen = new Set();
 
-  // Top-level model keys (populate for heavier users)
-  const modelKeys = [
-    ['seven_day_opus', 'Opus', '#C084FC'],
-    ['seven_day_sonnet', 'Sonnet', '#60A5FA'],
-    ['seven_day_cowork', 'Cowork', '#34D399'],
-  ];
-  for (const [key, name, color] of modelKeys) {
+  // Top-level seven_day_<model> keys — parse generically, don't hard-code names
+  const palette = { fable: '#34D399', opus: '#C084FC', sonnet: '#60A5FA', haiku: '#FBBF24', cowork: '#2DD4BF' };
+  for (const key of Object.keys(raw)) {
+    const m2 = key.match(/^seven_day_(\w+)$/);
+    if (!m2) continue;
     const m = raw[key];
     if (m && typeof m === 'object' && m.utilization != null) {
-      models.push({ id: name.toLowerCase(), name, pct: m.utilization, resetAt: m.resets_at, color });
-      seen.add(name.toLowerCase());
+      const id = m2[1].toLowerCase();
+      const name = id.charAt(0).toUpperCase() + id.slice(1);
+      models.push({ id, name, pct: m.utilization, resetAt: m.resets_at, color: palette[id] || '#8B5CF6' });
+      seen.add(id);
     }
   }
 
@@ -258,7 +283,6 @@ function parseUsage(raw, plan, tier) {
       }
       const dn = lim.scope?.model?.display_name;
       if (dn && !seen.has(dn.toLowerCase())) {
-        const palette = { fable: '#34D399', opus: '#C084FC', sonnet: '#60A5FA', haiku: '#FBBF24' };
         models.push({
           id: dn.toLowerCase(), name: dn,
           pct: lim.percent ?? 0, resetAt: lim.resets_at,
@@ -305,6 +329,147 @@ function mockUsage() {
 }
 
 // ═══════════════════════════════════════════
+//  Codex (OpenAI) — ~/.codex/auth.json + wham/usage
+// ═══════════════════════════════════════════
+function readCodexCredentials() {
+  const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  const p = path.join(home, 'auth.json');
+  try {
+    if (!fs.existsSync(p)) return null;
+    const j = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    const token = j.tokens?.access_token || j.access_token;
+    const accountId = j.tokens?.account_id || j.account_id || null;
+    const refreshToken = j.tokens?.refresh_token || j.refresh_token || null;
+    if (token) return { token, accountId, refreshToken };
+  } catch {}
+  return null;
+}
+
+function fetchCodexUsage(cred) {
+  return new Promise((resolve, reject) => {
+    const headers = {
+      'Authorization': `Bearer ${cred.token}`,
+      'Content-Type': 'application/json',
+    };
+    if (cred.accountId) headers['ChatGPT-Account-Id'] = cred.accountId;
+    const req = https.request('https://chatgpt.com/backend-api/wham/usage', { method: 'GET', headers }, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try { resolve(JSON.parse(body)); }
+          catch { reject(new Error('Codex: bad JSON')); }
+        } else if (res.statusCode === 401) {
+          reject(new Error('Codex: token expired — run `codex login`'));
+        } else {
+          reject(new Error(`Codex HTTP ${res.statusCode}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('Codex: timeout')); });
+    req.end();
+  });
+}
+
+function parseCodexUsage(raw) {
+  // Field names vary across backend versions — normalize defensively
+  const rl = raw.rate_limit || raw.rate_limits || raw;
+  const prim = rl.primary_window || rl.primary || raw.five_hour_limit;
+  const sec = rl.secondary_window || rl.secondary || raw.weekly_limit;
+  const norm = (w) => {
+    if (!w || typeof w !== 'object') return { pct: 0, resetAt: null };
+    const pct = w.used_percent ?? w.utilization ?? w.percent_used ?? 0;
+    let resetAt = w.resets_at ?? null;
+    const secs = w.resets_in_seconds ?? w.reset_after_seconds;
+    if (!resetAt && secs != null) resetAt = new Date(Date.now() + secs * 1000).toISOString();
+    // resets_at may be epoch seconds rather than ISO
+    if (typeof resetAt === 'number') resetAt = new Date(resetAt * 1000).toISOString();
+    return { pct: Math.round(pct * 10) / 10, resetAt };
+  };
+  return { session: norm(prim), weekly: norm(sec) };
+}
+
+// Codex CLI's public OAuth client id (from openai/codex source).
+// If refresh starts failing with invalid_client, this has rotated — check the codex repo.
+const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+let codexTokenCache = null; // { token, expiresAt } — in-memory only, never written to codex's auth.json
+let lastGoodCodex = null;
+
+function refreshCodexToken(refreshToken) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      client_id: CODEX_CLIENT_ID,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      scope: 'openid profile email',
+    });
+    const req = https.request('https://auth.openai.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, (res) => {
+      let b = '';
+      res.on('data', c => b += c);
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try {
+            const j = JSON.parse(b);
+            if (j.access_token) return resolve({ token: j.access_token, expiresIn: j.expires_in || 3600 });
+            reject(new Error('Codex refresh: no access_token in response'));
+          } catch { reject(new Error('Codex refresh: bad JSON')); }
+        } else {
+          reject(new Error(`Codex refresh HTTP ${res.statusCode}: ${b.slice(0, 120)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('Codex refresh: timeout')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+async function pollCodex() {
+  const cred = readCodexCredentials();
+  if (!cred) return null; // no Codex install — section stays hidden
+
+  // Prefer in-memory refreshed token if still valid
+  let token = (codexTokenCache && codexTokenCache.expiresAt > Date.now())
+    ? codexTokenCache.token : cred.token;
+
+  const attempt = async (t) => {
+    const raw = await fetchCodexUsage({ token: t, accountId: cred.accountId });
+    try { fs.writeFileSync(path.join(os.tmpdir(), 'codex-runner-usage.json'), JSON.stringify(raw, null, 2)); } catch {}
+    return parseCodexUsage(raw);
+  };
+
+  try {
+    const parsed = await attempt(token);
+    console.log(`  ✓  Codex — Session: ${parsed.session.pct}%, Weekly: ${parsed.weekly.pct}%`);
+    lastGoodCodex = parsed;
+    return parsed;
+  } catch (err) {
+    // 401 → try one refresh-and-retry cycle
+    if (/expired|401/.test(err.message) && cred.refreshToken) {
+      try {
+        const fresh = await refreshCodexToken(cred.refreshToken);
+        codexTokenCache = { token: fresh.token, expiresAt: Date.now() + (fresh.expiresIn - 60) * 1000 };
+        console.log('  ↻  Codex token refreshed');
+        const parsed = await attempt(fresh.token);
+        console.log(`  ✓  Codex — Session: ${parsed.session.pct}%, Weekly: ${parsed.weekly.pct}%`);
+        lastGoodCodex = parsed;
+        return parsed;
+      } catch (e2) {
+        console.log(`  ✗  ${e2.message}`);
+        return lastGoodCodex ? { ...lastGoodCodex, stale: true } : { error: e2.message };
+      }
+    }
+    console.log(`  ✗  ${err.message}`);
+    return lastGoodCodex ? { ...lastGoodCodex, stale: true } : { error: err.message };
+  }
+}
+
+// ═══════════════════════════════════════════
 //  Poll
 // ═══════════════════════════════════════════
 async function poll() {
@@ -317,18 +482,42 @@ async function poll() {
     if (!cred) {
       console.log('  ⚠  No credentials — demo mode');
       usage = mockUsage();
+    } else if (Date.now() < claudeBackoffUntil) {
+      // Rate limited — serve last good data, skip the network call
+      console.log(`  ⏸  Backing off until ${new Date(claudeBackoffUntil).toLocaleTimeString()}`);
+      usage = lastGoodUsage
+        ? { ...lastGoodUsage, stale: true }
+        : { ...mockUsage(), error: 'rate limited' };
     } else {
       try {
         const raw = await fetchUsageAPI(cred.token);
+        // Dump raw response for debugging — inspect with: cat /tmp/claude-runner-usage.json
+        try { fs.writeFileSync(path.join(os.tmpdir(), 'claude-runner-usage.json'), JSON.stringify(raw, null, 2)); } catch {}
+        console.log('  📦 Raw API keys:', Object.keys(raw).join(', '));
+        if (raw.limits) console.log('  📦 Limits models:', raw.limits.map(l => `${l.kind}:${l.scope?.model?.display_name ?? '–'}:${l.percent ?? '?'}%`).join(', '));
         usage = parseUsage(raw, cred.plan, cred.tier);
         console.log(`  ✓  Session: ${usage.session.pct}%, Weekly: ${usage.weekly.pct}%, Plan: ${usage.plan}`);
+        console.log(`  ✓  Models parsed: ${usage.models.map(m => `${m.name}:${m.pct}%`).join(', ') || 'none'}`);
+        lastGoodUsage = usage;
       } catch (err) {
         console.log(`  ✗  ${err.message}`);
-        usage = mockUsage();
-        usage.error = err.message;
+        if (/HTTP 429/.test(err.message)) {
+          const waitMs = err.retryAfter ? (err.retryAfter + 5) * 1000 : 10 * 60_000;
+          claudeBackoffUntil = Date.now() + waitMs;
+          console.log(`  ⏸  429 — backing off ${Math.round(waitMs / 60000)} min${err.retryAfter ? ' (server retry-after)' : ' (default)'}`);
+        }
+        // Serve stale-but-real data over fake demo data
+        usage = lastGoodUsage
+          ? { ...lastGoodUsage, stale: true, error: err.message }
+          : { ...mockUsage(), error: err.message };
       }
     }
   }
+
+  usage.codex = MOCK_MODE
+    ? { session: { pct: 41, resetAt: new Date(Date.now() + 2.2 * 3600000).toISOString() },
+        weekly: { pct: 67, resetAt: new Date(Date.now() + 2 * 86400000).toISOString() } }
+    : await pollCodex();
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('usage-update', usage);
@@ -338,7 +527,22 @@ async function poll() {
 // ═══════════════════════════════════════════
 //  IPC
 // ═══════════════════════════════════════════
-ipcMain.handle('refresh', async () => { await poll(); });
+let lastManualRefresh = 0;
+ipcMain.handle('refresh', async () => {
+  const now = Date.now();
+  if (now - lastManualRefresh < 30_000) {
+    console.log('  ⏸  Refresh debounced (30s min between manual refreshes)');
+    return;
+  }
+  lastManualRefresh = now;
+  await poll();
+});
+ipcMain.handle('resize', (_e, h) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const b = mainWindow.getBounds();
+  const height = Math.max(200, Math.min(800, Math.round(h)));
+  if (b.height !== height) mainWindow.setBounds({ ...b, height });
+});
 ipcMain.handle('close', () => { app.quit(); });
 ipcMain.handle('minimize', () => { mainWindow?.hide(); });
 
