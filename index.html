@@ -542,6 +542,9 @@ function renderModels(models) {
 }
 
 // ═══════════════════════════════════════════
+//  IPC from main process
+// ═══════════════════════════════════════════
+window.claude.onUsageUpdate((data) => {
   state.prevSessionPct = state.sessionPct;
   state.sessionPct = data.session?.pct ?? 0;
   state.weeklyPct = data.weekly?.pct ?? 0;
