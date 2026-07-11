@@ -16,10 +16,31 @@ export default function ClaudeRunner3D() {
   const snoreRef = useRef(null);
   const soundRef = useRef(true);
   const prevPctRef = useRef(0);
+  const pctHistory = useRef([]);
+  const [burnRate, setBurnRate] = useState(0);
+  const burnRef = useRef(0);
 
   // Keep refs in sync
   useEffect(() => { pctRef.current = pct; }, [pct]);
   useEffect(() => { soundRef.current = soundOn; }, [soundOn]);
+  useEffect(() => { burnRef.current = burnRate; }, [burnRate]);
+
+  // Burn rate — track pct changes over last 60s
+  useEffect(() => {
+    const now = Date.now();
+    pctHistory.current.push({ t: now, pct });
+    pctHistory.current = pctHistory.current.filter(p => now - p.t < 60000);
+    if (pctHistory.current.length >= 2) {
+      const first = pctHistory.current[0];
+      const last = pctHistory.current[pctHistory.current.length - 1];
+      const dt = (last.t - first.t) / 1000;
+      const dp = last.pct - first.pct;
+      if (dt > 0) {
+        const rate = Math.max(0, dp / dt);
+        setBurnRate(Math.min(3, rate * 50));
+      }
+    }
+  }, [pct]);
 
   // IPC from Electron main process
   useEffect(() => {
@@ -268,7 +289,7 @@ export default function ClaudeRunner3D() {
       const p = pctRef.current;
       const exh = p >= 100;
       const spd = exh ? 0 : p >= 90 ? 3 : p >= 60 ? 2 : p >= 20 ? 1 : 0.5;
-      const wrs = 0.7 + spd * 1.3;
+      const wrs = 0.7 + Math.max(spd, burnRef.current) * 1.3;
 
       if (!exh) wheelG.rotation.z += dt * wrs;
       updateArc(p);
@@ -347,7 +368,14 @@ export default function ClaudeRunner3D() {
         </div>
         <div style={{ padding:'0 12px 6px' }}>
           <div style={{ marginBottom:5 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:2 }}><span style={{ fontSize:9, color:'rgba(255,255,255,0.45)' }}>Session (5h)</span><span style={{ fontSize:9, fontWeight:600, color:col, fontVariantNumeric:'tabular-nums' }}>{pct}%</span></div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:2 }}>
+              <span style={{ fontSize:9, color:'rgba(255,255,255,0.45)' }}>Session (5h)</span>
+              <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                {burnRate >= 2 && !exh && <span style={{ fontSize:8, fontWeight:600, color:'#F87171' }}>🔥 FAST</span>}
+                {burnRate >= 1 && burnRate < 2 && !exh && <span style={{ fontSize:8, fontWeight:600, color:'#FBBF24' }}>⚡ MED</span>}
+                <span style={{ fontSize:9, fontWeight:600, color:col, fontVariantNumeric:'tabular-nums' }}>{pct}%</span>
+              </div>
+            </div>
             <div style={{ height:5, borderRadius:3, background:'rgba(255,255,255,0.06)', overflow:'hidden' }}><div style={{ width:`${Math.min(pct,100)}%`, height:'100%', borderRadius:3, background:col, transition:'width 0.4s' }} /></div>
           </div>
           <div style={{ marginBottom:5 }}>
