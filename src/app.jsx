@@ -13,7 +13,7 @@ export default function ClaudeRunner3D() {
   const [plan, setPlan] = useState('');
   const [mock, setMock] = useState(true);
   const [models, setModels] = useState([]);
-  const [mode, setMode] = useState('3d');
+  const [mode, setMode] = useState('2d');
   const snoreRef = useRef(null);
   const soundRef = useRef(true);
   const prevPctRef = useRef(0);
