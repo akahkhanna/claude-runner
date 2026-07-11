@@ -13,6 +13,7 @@ export default function ClaudeRunner3D() {
   const [plan, setPlan] = useState('');
   const [mock, setMock] = useState(true);
   const [models, setModels] = useState([]);
+  const [mode, setMode] = useState('3d');
   const snoreRef = useRef(null);
   const soundRef = useRef(true);
   const prevPctRef = useRef(0);
@@ -345,6 +346,76 @@ export default function ClaudeRunner3D() {
   const wcol = weeklyPct >= 90 ? '#F87171' : weeklyPct >= 70 ? '#FBBF24' : '#34D399';
   const exh = pct >= 100;
 
+  // ═══ 2D SVG Scene ═══
+  const [tick2d, setTick2d] = useState(0);
+  useEffect(() => {
+    if (mode !== '2d') return;
+    const iv = setInterval(() => setTick2d(t => t + 1), 83);
+    return () => clearInterval(iv);
+  }, [mode]);
+
+  const Scene2D = () => {
+    const t = tick2d, p = pct;
+    const exh2 = p >= 100;
+    const spd2 = exh2 ? 0 : p >= 90 ? 2.5 : p >= 60 ? 1.8 : p >= 20 ? 1 : 0.5;
+    const col2 = p >= 90 ? '#F87171' : p >= 70 ? '#FBBF24' : '#34D399';
+    const circ = 2 * Math.PI * 30, arc = (Math.min(p, 100) / 100) * circ;
+    const spokeRot = exh2 ? 0 : t * (1 + spd2 * 4);
+    const lgFrames = [[20,-15,-20,15],[35,-30,-35,30],[15,-10,-15,10],[-10,20,10,-20]];
+    const lg = spd2 > 0 ? lgFrames[t % 4] : [5,-5,-5,5];
+    const bounce = !exh2 && spd2 > 0 ? Math.abs(Math.sin(t * (0.04 + spd2 * 0.03))) * (1.5 + spd2 * 1.5) : 0;
+    const by = 50 - bounce, tw = Math.sin(t * 0.05) * 1.5;
+    const S = Math.sin, C = Math.cos, P = Math.PI;
+    const legL = (x1, y1, a, c) => <line x1={x1} y1={y1} x2={x1+S(a*P/180)*7} y2={y1+C(a*P/180)*7} stroke={c} strokeWidth="2.5" strokeLinecap="round"/>;
+
+    return (
+      <svg width="280" height="180" viewBox="0 0 100 85" style={{display:'block'}}>
+        <defs>
+          <radialGradient id="bg2" cx="0.4" cy="0.35" r="0.75"><stop offset="0%" stopColor="#E8B088"/><stop offset="55%" stopColor="#D4956B"/><stop offset="100%" stopColor="#B87A50"/></radialGradient>
+          <radialGradient id="hg2" cx="0.35" cy="0.3" r="0.8"><stop offset="0%" stopColor="#F0C09A"/><stop offset="60%" stopColor="#E0A878"/><stop offset="100%" stopColor="#C88E5E"/></radialGradient>
+        </defs>
+        <line x1="50" y1="68" x2="38" y2="80" stroke="#4A4A5A" strokeWidth="2.5" strokeLinecap="round"/>
+        <line x1="50" y1="68" x2="62" y2="80" stroke="#4A4A5A" strokeWidth="2.5" strokeLinecap="round"/>
+        <line x1="34" y1="80" x2="66" y2="80" stroke="#4A4A5A" strokeWidth="2" strokeLinecap="round"/>
+        <circle cx="50" cy="36" r="30" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="4"/>
+        <circle cx="50" cy="36" r="30" fill="none" stroke={col2} strokeWidth="4" opacity="0.4"
+          strokeDasharray={`${arc} ${circ}`} transform="rotate(-90 50 36)" strokeLinecap="round"/>
+        <g transform={`rotate(${spokeRot} 50 36)`}>
+          {Array.from({length:8}).map((_,i)=>{const a=(i/8)*P*2;return <line key={i} x1="50" y1="36" x2={50+C(a)*28} y2={36+S(a)*28} stroke="rgba(255,255,255,0.08)" strokeWidth="1"/>;})}
+        </g>
+        <circle cx="50" cy="36" r="3" fill="#3A3A4A" stroke="rgba(255,255,255,0.1)" strokeWidth="1"/>
+        {exh2 ? (
+          <g transform="translate(50,56)">
+            <ellipse cx="0" cy="0" rx="11" ry="6" fill="url(#bg2)" transform="rotate(15)"/>
+            <circle cx="-10" cy="-1" r="6.5" fill="url(#hg2)"/>
+            <line x1="-13" y1="-3" x2="-11" y2="-1" stroke="#5D3A1A" strokeWidth="1.2" strokeLinecap="round"/>
+            <line x1="-11" y1="-3" x2="-13" y2="-1" stroke="#5D3A1A" strokeWidth="1.2" strokeLinecap="round"/>
+            <line x1="-9" y1="-3" x2="-7" y2="-1" stroke="#5D3A1A" strokeWidth="1.2" strokeLinecap="round"/>
+            <line x1="-7" y1="-3" x2="-9" y2="-1" stroke="#5D3A1A" strokeWidth="1.2" strokeLinecap="round"/>
+            <ellipse cx="-10" cy="3" rx="2" ry="1.2" fill="#FF8A8A"/>
+            <text x="5" y={-8+S(t*0.04)*2} fontSize="8" fill="rgba(255,255,255,0.3)" fontWeight="bold">z</text>
+            <text x="11" y={-14+S(t*0.04+1)*2} fontSize="10" fill="rgba(255,255,255,0.2)" fontWeight="bold">z</text>
+          </g>
+        ) : (
+          <g transform={`translate(50,${by})`}>
+            <path d={`M 9 2 Q 16 ${-2+tw} 14 ${-6+tw*0.5}`} stroke="#C4845E" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
+            {legL(5,5,lg[2],'#B8835A')}{legL(2,5,lg[3],'#B8835A')}
+            <ellipse cx="0" cy="0" rx="10.5" ry="7.5" fill="url(#bg2)"/>
+            <ellipse cx="-2" cy="2.5" rx="6.5" ry="4.5" fill="#E8C4A0" opacity="0.6"/>
+            {legL(-6,5,lg[0],'#C4845E')}{legL(-3,5,lg[1],'#C4845E')}
+            <circle cx="-9" cy="-3" r="7.5" fill="url(#hg2)"/>
+            <circle cx="-5" cy="0.5" r="2.8" fill="#EF9A82" opacity="0.5"/>
+            <circle cx="-12" cy="-4" r="1.5" fill="#2D1A0E"/><circle cx="-7" cy="-4" r="1.5" fill="#2D1A0E"/>
+            <circle cx="-11.5" cy="-4.5" r="0.5" fill="white"/><circle cx="-6.5" cy="-4.5" r="0.5" fill="white"/>
+            <circle cx="-9.5" cy="-1.5" r="1" fill="#8B5E3C"/>
+            {spd2 >= 1.5 ? <ellipse cx="-9.5" cy="0.5" rx="1.5" ry={1+S(t*0.08)*0.5} fill="#C4645A"/> :
+              <path d="M -11 0 Q -9.5 2 -8 0" stroke="#8B5E3C" strokeWidth="0.7" fill="none"/>}
+          </g>
+        )}
+      </svg>
+    );
+  };
+
   return (
     <div style={{ width:280, margin:'16px auto', fontFamily:'-apple-system,system-ui,sans-serif', userSelect:'none' }}>
       <div style={{ background:'rgba(24,24,30,0.97)', borderRadius:14, border:'1px solid rgba(255,255,255,0.07)', boxShadow:'0 8px 30px rgba(0,0,0,0.5)', overflow:'hidden' }}>
@@ -355,12 +426,13 @@ export default function ClaudeRunner3D() {
             <span style={{ fontSize:11, fontWeight:600, color:'rgba(255,255,255,0.75)', marginLeft:3 }}>🐹 Claude Runner</span>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:4, WebkitAppRegion:'no-drag' }}>
+            <button onClick={()=>setMode(m=>m==='3d'?'2d':'3d')} style={{ fontSize:8, fontWeight:600, color:'#5B8DEF', background:'rgba(91,141,239,0.12)', padding:'2px 6px', borderRadius:4, border:'none', cursor:'pointer' }}>{mode.toUpperCase()}</button>
             {plan && plan !== 'demo' && plan !== 'unknown' && <span style={{ fontSize:8, fontWeight:600, color:'#8B5CF6', background:'rgba(139,92,246,0.12)', padding:'2px 6px', borderRadius:4, textTransform:'uppercase' }}>{plan}</span>}
             <span style={{ fontSize:8, fontWeight:600, color:mock?'rgba(255,255,255,0.3)':'#34D399', background:mock?'rgba(255,255,255,0.05)':'rgba(52,211,153,0.12)', padding:'2px 6px', borderRadius:4 }}>{mock?'DEMO':'LIVE'}</span>
             <button onClick={()=>{const n=!soundOn;setSoundOn(n);if(!n)stopSnore();else if(pct>=100)startSnore();}} style={{ background:'none',border:'none',cursor:'pointer',fontSize:12,color:soundOn?'#5B8DEF':'rgba(255,255,255,0.15)' }}>{soundOn?'🔔':'🔕'}</button>
           </div>
         </div>
-        <div ref={mountRef} style={{ width:280, height:180 }} />
+        {mode === '3d' ? <div ref={mountRef} style={{ width:280, height:180 }} /> : <Scene2D />}
         <div style={{ textAlign:'center', padding:'1px 12px 4px', fontSize:10, color:'rgba(255,255,255,0.4)', fontWeight:500 }}>{exh?'💤 Collapsed…':pct>=90?'🏃 Sprinting!':pct>=60?'😤 Running hard':pct>=20?'🐹 Jogging':'✨ Fresh'}</div>
         <div style={{ margin:'0 12px 5px', padding:'6px 8px', borderRadius:8, textAlign:'center', background:exh?'rgba(248,113,113,0.08)':'rgba(255,255,255,0.03)', border:`1px solid ${exh?'rgba(248,113,113,0.12)':'rgba(255,255,255,0.04)'}` }}>
           <div style={{ fontSize:22, fontWeight:700, letterSpacing:-1, fontVariantNumeric:'tabular-nums', fontFamily:"ui-monospace,'SF Mono',Menlo,monospace", color:exh?'#F87171':'rgba(255,255,255,0.85)' }}>{fmtCountdown(resetMs)}</div>
