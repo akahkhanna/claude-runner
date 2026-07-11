@@ -12,16 +12,26 @@
     "type": "git",
     "url": "https://github.com/akahkhanna/claude-runner.git"
   },
-  "keywords": ["claude", "anthropic", "usage", "monitor", "widget", "desktop", "electron", "hamster", "3d"],
+  "keywords": [
+    "claude",
+    "anthropic",
+    "usage",
+    "monitor",
+    "widget",
+    "desktop",
+    "electron",
+    "hamster",
+    "3d"
+  ],
   "author": "Akash Khanna",
   "license": "MIT",
   "dependencies": {
-    "electron": "^33.0.0",
+    "electron": "^43.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "three": "^0.170.0"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.28.1"
   }
 }
