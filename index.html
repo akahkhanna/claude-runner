@@ -358,9 +358,10 @@ function animate(){
   usageArc.setAttribute('stroke',usageColor(p));
 
   if(exh){
-    hamsterG.setAttribute('transform','translate(50,34)');
-    groundShadow.setAttribute('opacity',0.3);
-    groundShadow.setAttribute('rx',12);groundShadow.setAttribute('ry',2.5);
+    hamsterG.setAttribute('transform','translate(50,56)');
+    groundShadow.setAttribute('opacity',0.25);
+    groundShadow.setAttribute('cy',63);
+    groundShadow.setAttribute('rx',12);groundShadow.setAttribute('ry',2.2);
     h.bodyHi.setAttribute('opacity',0);
     h.body.setAttribute('rx',11);h.body.setAttribute('ry',6);h.body.setAttribute('transform','rotate(15)');
     h.head.setAttribute('cx',-10);h.head.setAttribute('cy',-1);
@@ -383,12 +384,15 @@ function animate(){
   } else {
     if(snoring) stopSnore();
     const bounce = spd>0?Math.abs(sin(tick*(0.04+spd*0.03)))*(1.5+spd*1.5):0;
-    const by=26-bounce-(state.celebrating?Math.abs(sin(tick*0.08))*8:0);
+    // Base Y=50 puts the hamster's feet on the inner bottom track of the wheel
+    // (wheel center cy=36, radius=30, feet at local y~12 → sits on inner track)
+    const by=50-bounce-(state.celebrating?Math.abs(sin(tick*0.08))*8:0);
     hamsterG.setAttribute('transform',`translate(50,${by})`);
-    // Ground shadow shrinks as hamster rises
-    groundShadow.setAttribute('opacity',0.25);
-    groundShadow.setAttribute('rx',11-bounce*0.6);
-    groundShadow.setAttribute('ry',2.5-bounce*0.15);
+    // Ground shadow sits on the inner track under the hamster
+    groundShadow.setAttribute('opacity',0.2);
+    groundShadow.setAttribute('cy',63);
+    groundShadow.setAttribute('rx',9-bounce*0.5);
+    groundShadow.setAttribute('ry',2-bounce*0.12);
     h.body.setAttribute('rx',10.5);h.body.setAttribute('ry',7.5+sin(tick*0.05)*0.3);h.body.setAttribute('transform','');
     h.bodyHi.setAttribute('opacity',0.25);
     h.head.setAttribute('cx',-9);h.head.setAttribute('cy',-3);
