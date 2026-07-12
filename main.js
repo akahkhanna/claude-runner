@@ -117,8 +117,9 @@ X-GNOME-Autostart-enabled=true
 
 function createTray() {
   const icon = nativeImage.createFromDataURL(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAgklEQVR42mL4////8/AwAI/AL+hc2rNAAAAABJRU5ErkJggg=='
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAmklEQVR4nO2VwQ7AIAhDcdn///J22clQJrYhHmiyZFGBZ93QrNVq5fR8j0xXohh6pzSC4kz8sjwHpBbvAJSKAaDtj5Iwx5AC8xbPxQcYl4DMi1BxNE+DVHyEIfQfgKr5wNibCVaosg+4G5kBJP92Rp4DpRDoCMogjr4L1C64+Y52wEznAsyz4gALEcZnk2e64tZtqAApb2YtSi+dthUm/XNOGgAAAABJRU5ErkJggg=='
   );
+  icon.setTemplateImage(true); // adapts to light/dark menu bar on macOS
   tray = new Tray(icon.resize({ width: 16, height: 16 }));
   tray.setToolTip('Claude Runner 🐹');
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -621,6 +622,8 @@ async function poll() {
 //  IPC
 // ═══════════════════════════════════════════
 let lastManualRefresh = 0;
+ipcMain.handle('get-startup', () => startupEnabled());
+ipcMain.handle('set-startup', (_e, on) => { setStartup(on); return startupEnabled(); });
 ipcMain.handle('refresh', async () => {
   const now = Date.now();
   if (now - lastManualRefresh < 30_000) {

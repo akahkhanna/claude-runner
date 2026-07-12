@@ -8,6 +8,7 @@ export default function ClaudeRunner3D() {
   const [weeklyPct, setWeeklyPct] = useState(0);
   const [simulating, setSimulating] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
+  const [startup, setStartup] = useState(false);
   const [resetMs, setResetMs] = useState(0);
   const [weeklyResetMs, setWeeklyResetMs] = useState(0);
   const [plan, setPlan] = useState('');
@@ -26,6 +27,7 @@ export default function ClaudeRunner3D() {
   // Keep refs in sync
   useEffect(() => { pctRef.current = pct; }, [pct]);
   useEffect(() => { soundRef.current = soundOn; }, [soundOn]);
+  useEffect(() => { window.claude?.getStartup?.().then(v => setStartup(!!v)); }, []);
   useEffect(() => { burnRef.current = burnRate; }, [burnRate]);
 
   // Auto-fit window height to content (card height + body padding + margins)
@@ -458,6 +460,7 @@ export default function ClaudeRunner3D() {
             {plan && plan !== 'demo' && plan !== 'unknown' && <span style={{ fontSize:8, fontWeight:600, color:'#8B5CF6', background:'rgba(139,92,246,0.12)', padding:'2px 6px', borderRadius:4, textTransform:'uppercase' }}>{plan}</span>}
             <span style={{ fontSize:8, fontWeight:600, color:mock?'rgba(255,255,255,0.3)':stale?'#FBBF24':'#34D399', background:mock?'rgba(255,255,255,0.05)':stale?'rgba(251,191,36,0.12)':'rgba(52,211,153,0.12)', padding:'2px 6px', borderRadius:4 }}>{mock?'DEMO':stale?'STALE':'LIVE'}</span>
             <button onClick={()=>{const n=!soundOn;setSoundOn(n);if(!n)stopSnore();else if(pct>=100)startSnore();}} style={{ background:'none',border:'none',cursor:'pointer',fontSize:12,color:soundOn?'#5B8DEF':'rgba(255,255,255,0.15)' }}>{soundOn?'🔔':'🔕'}</button>
+            <button title={startup?'Launches at login — click to disable':'Click to launch at login'} onClick={async()=>{const v=await window.claude?.setStartup?.(!startup);setStartup(!!v);}} style={{ background:'none',border:'none',cursor:'pointer',fontSize:12,opacity:startup?1:0.3 }}>🚀</button>
           </div>
         </div>
         <div ref={mountRef} style={{ width:280, height:180, display: mode === '3d' ? 'block' : 'none' }} />

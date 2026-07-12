@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('claude', {
   },
   refresh: () => ipcRenderer.invoke('refresh'),
   resize: (h) => ipcRenderer.invoke('resize', h),
+  getStartup: () => ipcRenderer.invoke('get-startup'),
+  setStartup: (on) => ipcRenderer.invoke('set-startup', on),
   close: () => ipcRenderer.invoke('close'),
   minimize: () => ipcRenderer.invoke('minimize'),
 });
