@@ -460,7 +460,32 @@ function parseCodexUsage(raw) {
 // Codex CLI's public OAuth client id (from openai/codex source).
 // If refresh starts failing with invalid_client, this has rotated — check the codex repo.
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
-let codexTokenCache = null; // { token, expiresAt } — in-memory only, never written to codex's auth.json
+let codexTokenCache = null; // { token, expiresAt } — hot cache; rotated tokens are ALSO persisted (see persistCodexTokens)
+
+// OpenAI rotates refresh tokens: each use invalidates the old one. Whoever
+// spends the token MUST persist the replacement or the chain breaks for every
+// consumer (including the Codex CLI). Atomic write, and only if the file still
+// holds the RT we consumed — if the CLI rotated it concurrently, theirs wins.
+function persistCodexTokens(consumedRT, fresh) {
+  try {
+    const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+    const p = path.join(home, 'auth.json');
+    const j = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    const cur = j.tokens?.refresh_token || j.refresh_token;
+    if (cur !== consumedRT) return; // file changed under us — don't clobber
+    if (!j.tokens) j.tokens = {};
+    j.tokens.access_token = fresh.token;
+    if (fresh.refreshToken) j.tokens.refresh_token = fresh.refreshToken;
+    if (fresh.idToken) j.tokens.id_token = fresh.idToken;
+    j.last_refresh = new Date().toISOString();
+    const tmp = p + '.claude-runner-tmp';
+    fs.writeFileSync(tmp, JSON.stringify(j, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, p);
+    console.log('  💾 Codex rotated tokens persisted to auth.json');
+  } catch (e) {
+    console.log(`  ⚠  Could not persist rotated Codex tokens: ${e.message}`);
+  }
+}
 let lastGoodCodex = null;
 
 function refreshCodexToken(refreshToken) {
@@ -481,7 +506,7 @@ function refreshCodexToken(refreshToken) {
         if (res.statusCode === 200) {
           try {
             const j = JSON.parse(b);
-            if (j.access_token) return resolve({ token: j.access_token, expiresIn: j.expires_in || 3600 });
+            if (j.access_token) return resolve({ token: j.access_token, refreshToken: j.refresh_token || null, idToken: j.id_token || null, expiresIn: j.expires_in || 3600 });
             reject(new Error('Codex refresh: no access_token in response'));
           } catch { reject(new Error('Codex refresh: bad JSON')); }
         } else {
@@ -521,6 +546,7 @@ async function pollCodex() {
       try {
         const fresh = await refreshCodexToken(cred.refreshToken);
         codexTokenCache = { token: fresh.token, expiresAt: Date.now() + (fresh.expiresIn - 60) * 1000 };
+        persistCodexTokens(cred.refreshToken, fresh);
         console.log('  ↻  Codex token refreshed');
         const parsed = await attempt(fresh.token);
         console.log(`  ✓  Codex — Session: ${parsed.session.pct}%, Weekly: ${parsed.weekly.pct}%`);

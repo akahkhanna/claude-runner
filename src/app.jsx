@@ -492,6 +492,12 @@ export default function ClaudeRunner3D() {
               <span style={{ fontSize:8, fontWeight:600, color:m.color, width:22, textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{m.pct}%</span>
             </div>)}
           </div>
+          {codex && codex.error && (
+            <div style={{ paddingTop:5, marginTop:5, borderTop:'1px solid rgba(255,255,255,0.04)' }}>
+              <div style={{ fontSize:8, color:'rgba(255,255,255,0.3)', textTransform:'uppercase', letterSpacing:0.6, marginBottom:3 }}>⬡ Codex</div>
+              <div style={{ fontSize:9, color:'#FBBF24' }}>⚠ {String(codex.error).slice(0, 60)}</div>
+            </div>
+          )}
           {codex && !codex.error && (() => {
             const cs = codex.session?.pct ?? 0, cw = codex.weekly?.pct ?? 0;
             const csCol = cs >= 90 ? '#F87171' : cs >= 70 ? '#FBBF24' : '#74AA9C';
