@@ -51,6 +51,70 @@ function createWindow() {
 // ═══════════════════════════════════════════
 //  Tray
 // ═══════════════════════════════════════════
+
+// ── Launch at startup ──
+// Electron's openAtLogin is unreliable for unpackaged apps on macOS
+// (it registers the bare Electron binary without the app path), so:
+//   macOS unpackaged → LaunchAgent plist
+//   Linux            → ~/.config/autostart .desktop entry
+//   Windows / packaged builds → setLoginItemSettings
+const { execSync: execSyncStartup } = require('child_process');
+const MAC_PLIST = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.akahkhanna.claude-runner.plist');
+const LINUX_DESKTOP = path.join(os.homedir(), '.config', 'autostart', 'claude-runner.desktop');
+
+function startupEnabled() {
+  try {
+    if (process.platform === 'darwin' && !app.isPackaged) return fs.existsSync(MAC_PLIST);
+    if (process.platform === 'linux') return fs.existsSync(LINUX_DESKTOP);
+    return app.getLoginItemSettings().openAtLogin;
+  } catch { return false; }
+}
+
+function setStartup(on) {
+  try {
+    if (process.platform === 'darwin' && !app.isPackaged) {
+      if (on) {
+        const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.akahkhanna.claude-runner</string>
+  <key>ProgramArguments</key><array>
+    <string>${process.execPath}</string>
+    <string>${app.getAppPath()}</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+</dict></plist>`;
+        fs.mkdirSync(path.dirname(MAC_PLIST), { recursive: true });
+        fs.writeFileSync(MAC_PLIST, plist);
+        try { execSyncStartup(`launchctl load "${MAC_PLIST}"`); } catch {}
+      } else {
+        try { execSyncStartup(`launchctl unload "${MAC_PLIST}"`); } catch {}
+        if (fs.existsSync(MAC_PLIST)) fs.unlinkSync(MAC_PLIST);
+      }
+    } else if (process.platform === 'linux') {
+      if (on) {
+        fs.mkdirSync(path.dirname(LINUX_DESKTOP), { recursive: true });
+        fs.writeFileSync(LINUX_DESKTOP, `[Desktop Entry]
+Type=Application
+Name=Claude Runner
+Exec="${process.execPath}" "${app.getAppPath()}"
+X-GNOME-Autostart-enabled=true
+`);
+      } else if (fs.existsSync(LINUX_DESKTOP)) fs.unlinkSync(LINUX_DESKTOP);
+    } else {
+      app.setLoginItemSettings({
+        openAtLogin: on,
+        path: process.execPath,
+        args: app.isPackaged ? [] : [app.getAppPath()],
+      });
+    }
+    console.log(`  ⚙  Launch at startup: ${on ? 'enabled' : 'disabled'}`);
+  } catch (e) {
+    console.log(`  ✗  Startup toggle failed: ${e.message}`);
+  }
+}
+
 function createTray() {
   const icon = nativeImage.createFromDataURL(
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAgklEQVR42mL4////8/AwAI/AL+hc2rNAAAAABJRU5ErkJggg=='
@@ -63,6 +127,9 @@ function createTray() {
       else { mainWindow?.show(); mainWindow?.focus(); }
     }},
     { label: 'Refresh Now', click: () => poll() },
+    { type: 'separator' },
+    { label: 'Launch at startup', type: 'checkbox', checked: startupEnabled(),
+      click: (item) => setStartup(item.checked) },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));
